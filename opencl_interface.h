@@ -6,12 +6,14 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <stdexcept>
 #include <CL/opencl.hpp>
 
 class OpenCLInterface
 {
     public:
-        bool isInitialized = false;
+        bool isInitialized;
+        bool errorEncountered;
         OpenCLInterface();
         void initialize(const char *source, const char *programName,
                         size_t globalSize, std::vector<float*> inputPtrs,
@@ -46,15 +48,15 @@ class OpenCLInterface
 
         std::string getCodeExplanation(cl_int code);
         void printCodeExplanation(cl_int code);
-        void getPlatformIDs();
-        void getDeviceIDs();
-        void createContext();
-        void createCommandQueue();
-        void createInBuffer(size_t bufferSize, float *data);
-        void createOutBuffer(size_t bufferSize, float *data);
-        void createProgram();
+        int getPlatformIDs();
+        int getDeviceIDs();
+        int createContext();
+        int createCommandQueue();
+        int createInBuffer(size_t bufferSize, float *data);
+        int createOutBuffer(size_t bufferSize, float *data);
+        int createProgram();
         int buildProgram();
-        void createKernel();
+        int createKernel();
         void setKernelArgs();
         void setKernelArg(int bufferIndex, float* newValues);
 };

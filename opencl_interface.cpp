@@ -7,33 +7,66 @@
 #include "opencl_interface.h"
 
 OpenCLInterface::OpenCLInterface(){
-    this->getPlatformIDs();
-    this->getDeviceIDs();
-    this->createContext();
-    this->createCommandQueue();
-    std:: cout << "Construction done!\n";
+    this->isInitialized = false;
+    this->errorEncountered = false;
+    try {
+        if (this->getPlatformIDs() != 0){
+            throw std::runtime_error("");
+        }
+        if (this->getDeviceIDs() != 0){
+            throw std::runtime_error("");
+        }
+        if (this->createContext() != 0){
+            throw std::runtime_error("");
+        }
+        if (this->createCommandQueue() != 0){
+            throw std::runtime_error("");
+        }
+
+        std::cout << "Interface constructed successfully!\n\n";
+        this->isInitialized = true;
+    }
+    catch (const std::exception& e){
+        std::cerr << "Error: Couldn't construct OpenCL interface" << e.what() << std::endl;
+        this->errorEncountered = true;
+    }
 }
 
 void OpenCLInterface::initialize(const char* source, const char* programName,
                                  size_t globalSize, std::vector<float*> inputPtrs,
                                  std::vector<size_t>inputSizes, float* output,
                                  size_t outputSize){
-    this->output = output;
-    this->outputSize = outputSize;
-    this->globalWorkSize = globalSize;
-    this->inputSizes = inputSizes;
-    for (int i = 0 ; i < inputPtrs.size() ; i++){
-        this->createInBuffer(inputSizes.at(i), inputPtrs.at(i));
-    }
-    this->createOutBuffer(outputSize, output);
+    try {
+        this->output = output;
+        this->outputSize = outputSize;
+        this->globalWorkSize = globalSize;
+        this->inputSizes = inputSizes;
+        for (int i = 0 ; i < inputPtrs.size() ; i++){
+            if(this->createInBuffer(inputSizes.at(i), inputPtrs.at(i)) != 0){
+                throw std::runtime_error("");
+            }
+        }
+        if (this->createOutBuffer(outputSize, output) != 0){
+            throw std::runtime_error("");
+        }
+        this->setSource(source, programName);
+        if (this->createProgram() != 0){
+            throw std::runtime_error("");
+        }
+        if (this->buildProgram() != 0){
+            throw std::runtime_error("");
+        }
+        if (this->createKernel() != 0){
+            throw std::runtime_error("");
+        }
 
-    this->setSource(source, programName);
-    this->createProgram();
-    this->buildProgram();
-    this->createKernel();
-    this->setKernelArgs();
-    std::cout << "Interface initialized successfully!\n\n";
-    this->isInitialized = true;
+        this->setKernelArgs();
+        std::cout << "Interface initialized successfully!\n\n";
+        this->isInitialized = true;
+    } catch (const std::exception& e){
+        std::cerr << "Error: Couldn't initialize OpenCL interface" << std::endl;
+        this->errorEncountered = true;
+    }
 }
 
 std::string OpenCLInterface::getCodeExplanation(cl_int code){
@@ -246,56 +279,115 @@ void OpenCLInterface::printInfo(){
         std::cout << "Output size: " << this->outputSize << "\n";
         std::cout << "Global work size: " << globalWorkSize << "\n";
     }
-
-
     std::cout << "\n\n";
 }
 
-void OpenCLInterface::getPlatformIDs(){
-    cl_int result = clGetPlatformIDs(1, &(this->platform), NULL);
-    std::cout << "Get platform IDs: " 
-              << this->getCodeExplanation(result)
-              << std::endl;
+int OpenCLInterface::getPlatformIDs(){
+    try {
+        cl_int result = clGetPlatformIDs(1, &(this->platform), NULL);
+        if (result == CL_SUCCESS) {
+            std::cout << "Platform ID received\n";
+        } else {
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Coudn't get platform ID: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
+        return -1;
+    }
+    return 0;
 }
 
-void OpenCLInterface::getDeviceIDs(){
-    cl_int result = clGetDeviceIDs(this->platform, CL_DEVICE_TYPE_GPU, 1, &(this->device), NULL);
-    std::cout << "Get device IDs: " 
-              << this->getCodeExplanation(result)
-              << std::endl;
+int OpenCLInterface::getDeviceIDs(){
+    try {
+        cl_int result = clGetDeviceIDs(this->platform,
+                                       CL_DEVICE_TYPE_GPU,
+                                       1,
+                                       &(this->device),
+                                       NULL);
+        if (result == CL_SUCCESS) {
+            std::cout << "Device ID received\n";
+        } else {
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Coudn't get device ID: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
+        return -1;
+    }
+    return 0;
 }
 
-void OpenCLInterface::createContext(){
+int OpenCLInterface::createContext(){
+    try {
     cl_int result;
-    this->context = clCreateContext(0, 1, &(this->device), NULL, NULL, &result);
-    std::cout << "Create Context: " 
-              << this->getCodeExplanation(result)
-              << std::endl;
+        this->context = clCreateContext(0, 1, &(this->device), NULL, NULL, &result);
+        if (result == CL_SUCCESS) {
+            std::cout << "Context created\n";
+        } else {
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Couldn't create context: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
+        return -1;
+    }
+    return 0;
 }
 
-void OpenCLInterface::createCommandQueue(){
-    cl_int result;
-    this->queue = clCreateCommandQueueWithProperties(this->context, this->device, 0, &result);
+int OpenCLInterface::createCommandQueue(){
+    try {
+        cl_int result;
+        this->queue = clCreateCommandQueueWithProperties(this->context, this->device, 0, &result);
+        if (result == CL_SUCCESS) {
+            std::cout << "Command queue created\n";
+        } else {
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Couldn't create command queue: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
+        return -1;
+    }
+    return 0;
 }
 
-void OpenCLInterface::createInBuffer(size_t bufferSize, float *data){
-    cl_int result;
-    cl_mem buffer = clCreateBuffer(this->context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 
-                                      bufferSize, data, &result);
-    std::cout << "Create buffer: " 
-              << this->getCodeExplanation(result)
-              << std::endl;
-    this->inBuffers.push_back(buffer);
+int OpenCLInterface::createInBuffer(size_t bufferSize, float *data){
+    try {
+        cl_int result;
+        cl_mem buffer = clCreateBuffer(this->context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 
+                                          bufferSize, data, &result);
+        if (result == CL_SUCCESS) {
+            std::cout << "Input buffer created\n";
+            this->inBuffers.push_back(buffer);
+        } else {
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Couldn't create input buffer: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
+        return -1;
+    }
+    return 0;
 }
 
-void OpenCLInterface::createOutBuffer(size_t bufferSize, float *data){
-    cl_int result;
-    cl_mem buffer = clCreateBuffer(this->context, CL_MEM_WRITE_ONLY, 
-                                      bufferSize, NULL, &result);
-    std::cout << "Create buffer: " 
-              << this->getCodeExplanation(result)
-              << std::endl;
-    this->outBuffer = buffer;
+int OpenCLInterface::createOutBuffer(size_t bufferSize, float *data){
+    try {
+        cl_int result;
+        cl_mem buffer = clCreateBuffer(this->context, CL_MEM_WRITE_ONLY, 
+                                          bufferSize, NULL, &result);
+        if (result == CL_SUCCESS) {
+            std::cout << "Output buffer created\n";
+            this->outBuffer = buffer;
+        } else {
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Couldn't create output buffer: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
+        return -1;
+    }
+    return 0;
 }
 
 void OpenCLInterface::setGlobalWorkSize(size_t size){
@@ -307,37 +399,54 @@ void OpenCLInterface::setSource(const char* source, const char* name){
     this->programName = name;
 }
 
-void OpenCLInterface::createProgram(){
-    cl_int result;
-    this->program = clCreateProgramWithSource(this->context, 1, &(this->programSource), NULL, &result);
-    std::cout << "Create program: " 
-              << this->getCodeExplanation(result)
-              << std::endl;
+int OpenCLInterface::createProgram(){
+    try {
+        cl_int result;
+        this->program = clCreateProgramWithSource(this->context, 1, &(this->programSource), NULL, &result);
+        if (result == CL_SUCCESS) {
+            std::cout << "Program created\n";
+        } else {
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Couldn't create program: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
+        return -1;
+    }
+    return 0;
 }
 
 int OpenCLInterface::buildProgram(){
-    cl_int result = clBuildProgram(this->program, 1, &(this->device), NULL, NULL, NULL);
-    std::cout << "Build program: " 
-              << this->getCodeExplanation(result)
-              << std::endl;
-    if (result != CL_SUCCESS){
-        size_t logSize;
-        clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &logSize);
-        std::vector<char> log(logSize);
-        clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, logSize, log.data(), NULL);
-        fprintf(stderr, "OpenCL Build Error:\n%s\n", log.data());
+    try {
+        cl_int result = clBuildProgram(this->program, 1, &(this->device), NULL, NULL, NULL);
+        if (result == CL_SUCCESS) {
+            std::cout << "Program built\n";
+        } else {
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Couldn't build program: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
         return -1;
-    } else {
-        return 0;
     }
+    return 0;
 }
 
-void OpenCLInterface::createKernel(){
-    cl_int result;
-    this->kernel = clCreateKernel(program, this->programName, &result);
-    std::cout << "Create kernel: " 
-              << this->getCodeExplanation(result)
-              << std::endl;
+int OpenCLInterface::createKernel(){
+    try {
+        cl_int result;
+        this->kernel = clCreateKernel(program, this->programName, &result);
+        if (result == CL_SUCCESS) {
+            std::cout << "Kernel created\n";
+        } else {
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Couldn't create kernel: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
+        return -1;
+    }
+    return 0;
 }
 
 void OpenCLInterface::setKernelArgs(){
