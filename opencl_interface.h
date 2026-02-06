@@ -9,25 +9,37 @@
 #include <stdexcept>
 #include <CL/opencl.hpp>
 
+struct OpenCLBuffer {
+    size_t index;
+    size_t numElements;
+    size_t sizeBytes;
+    bool isInput;
+    float *data = nullptr;
+    cl_mem handle = nullptr;
+};
+
 class OpenCLInterface
 {
     public:
         bool isInitialized;
         bool errorEncountered;
         OpenCLInterface();
-        void initialize(const char *source, const char *programName,
-                        size_t globalSize, std::vector<float*> inputPtrs,
-                        std::vector<size_t>inputSizes, float* output,
-                        size_t outputSize);
+        void initialize(const char* source,
+                        const char* programName,
+                        size_t globalWorkSize,
+                        std::vector<size_t> inputNumElements,
+                        std::vector<float*> inputPtrs,
+                        std::vector<size_t> outputNumElements,
+                        std::vector<float*> outputPtrs);
         void setGlobalWorkSize(size_t size);
         void setSource(const char* source, const char* name);
-        void updateBuffer(const int bufferIndex, const float *newData);
-        void setFloatArg(const int index, float value);
+        float* getBufferDataPtr(const int index, bool isInput);
+        void updateBuffer(const int index);
         void printInfo();
         void cleanup();
-        void executeAndRead();
+        void executeAndRead(const int index);
         void execute();
-        void readResult();
+        void readResult(const int index);
 
     private:
         cl_platform_id platform;
@@ -38,13 +50,9 @@ class OpenCLInterface
         cl_kernel kernel;
         const char* programSource = "No program";
         const char* programName = "No program name";
-        std::vector<cl_mem> inBuffers;
-        cl_mem outBuffer;
         size_t globalWorkSize;
-        std::vector<size_t> inputSizes;
-        size_t outputSize;
-        float *output = nullptr;
-
+        std::vector<OpenCLBuffer> inBuffers = {};
+        std::vector<OpenCLBuffer> outBuffers = {};
 
         std::string getCodeExplanation(cl_int code);
         void printCodeExplanation(cl_int code);
@@ -52,13 +60,15 @@ class OpenCLInterface
         int getDeviceIDs();
         int createContext();
         int createCommandQueue();
-        int createInBuffer(size_t bufferSize, float *data);
-        int createOutBuffer(size_t bufferSize, float *data);
+        int newBuffer(size_t numElements, float *data, bool isInput);
+        int createInBuffer(size_t bufferSize, float *data, cl_mem *handle);
+        int createOutBuffer(size_t bufferSize, float *data, cl_mem *handle);
         int createProgram();
         int buildProgram();
         int createKernel();
-        void setKernelArgs();
-        void setKernelArg(int bufferIndex, float* newValues);
+        int setAllKernelArgs();
+        int setKernelArg(const int index, cl_mem handle);
+
 };
 
 #endif // OPENCL_INTERFACE

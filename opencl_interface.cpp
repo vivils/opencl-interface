@@ -32,23 +32,46 @@ OpenCLInterface::OpenCLInterface(){
     }
 }
 
-void OpenCLInterface::initialize(const char* source, const char* programName,
-                                 size_t globalSize, std::vector<float*> inputPtrs,
-                                 std::vector<size_t>inputSizes, float* output,
-                                 size_t outputSize){
+void OpenCLInterface::initialize(const char* programName,
+                                 const char* source,
+                                 size_t globalWorkSize,
+                                 std::vector<size_t> inputNumElements,
+                                 std::vector<float*> inputPtrs,
+                                 std::vector<size_t> outputNumElements,
+                                 std::vector<float*> outputPtrs){
     try {
-        this->output = output;
-        this->outputSize = outputSize;
-        this->globalWorkSize = globalSize;
-        this->inputSizes = inputSizes;
+        if (inputNumElements.size() != inputPtrs.size()){
+            throw std::runtime_error("Length of input data pointers and length of input sizes don't match!");
+        }
+
+        if (outputNumElements.size() != outputPtrs.size()){
+            throw std::runtime_error("Length of output data pointers and length of output sizes don't match!");
+        }
+
+        this->globalWorkSize = globalWorkSize;
+
+        int numElements;
+        float *dataPtr;
+        bool isInput;
         for (int i = 0 ; i < inputPtrs.size() ; i++){
-            if(this->createInBuffer(inputSizes.at(i), inputPtrs.at(i)) != 0){
+            numElements = inputNumElements[i];
+            dataPtr = inputPtrs.at(i);
+            isInput = true;
+            if(this->newBuffer(numElements, dataPtr, isInput) != 0){
                 throw std::runtime_error("");
             }
         }
-        if (this->createOutBuffer(outputSize, output) != 0){
-            throw std::runtime_error("");
+        int numOutputs = outputPtrs.size();
+        std::cout << "Num outputs: " << numOutputs << std::endl;
+        for (int i = 0 ; i < numOutputs ; i++){
+            numElements = outputNumElements[i];
+            dataPtr = outputPtrs[i];
+            isInput = false;
+            if(this->newBuffer(numElements, dataPtr, isInput) != 0){
+                throw std::runtime_error("");
+            }
         }
+
         this->setSource(source, programName);
         if (this->createProgram() != 0){
             throw std::runtime_error("");
@@ -60,13 +83,56 @@ void OpenCLInterface::initialize(const char* source, const char* programName,
             throw std::runtime_error("");
         }
 
-        this->setKernelArgs();
+        if (this->setAllKernelArgs() != 0){
+            throw std::runtime_error("");
+        }
         std::cout << "Interface initialized successfully!\n\n";
         this->isInitialized = true;
     } catch (const std::exception& e){
-        std::cerr << "Error: Couldn't initialize OpenCL interface" << std::endl;
+        std::cerr << "Error: Couldn't initialize OpenCL interface: " << e.what() << std::endl;
         this->errorEncountered = true;
     }
+}
+
+int OpenCLInterface::newBuffer(size_t numElements, float *data, bool isInput){
+    int index = this->inBuffers.size() + this->outBuffers.size();
+    size_t sizeBytes = numElements*sizeof(float);
+    cl_mem handle = nullptr;
+
+    OpenCLBuffer buffer;
+    buffer.index = index;
+    buffer.numElements = numElements;
+    buffer.sizeBytes = sizeBytes;
+    buffer.isInput = isInput;
+    buffer.data = data;
+    
+    try {
+        int result;
+        if (buffer.isInput){
+            result = this->createInBuffer(sizeBytes, data, &handle);
+        } else {
+            result = this->createOutBuffer(sizeBytes, data, &handle);
+        }
+        if (result != 0){
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Create buffer failed: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
+        return -1;
+    }
+    buffer.handle = handle;
+    if (isInput){
+        this->inBuffers.push_back(buffer);
+    } else {
+        this->outBuffers.push_back(buffer);
+    }
+
+    if (handle == nullptr){
+        std::cout << "handle is nullptr\n";
+    }
+    return 0;
 }
 
 std::string OpenCLInterface::getCodeExplanation(cl_int code){
@@ -268,16 +334,19 @@ void OpenCLInterface::printInfo(){
         std::cout << "Program name: " << this->programName << std::endl;
         std::cout << "Program source: \n\n" << this->programSource << std::endl;
         std::cout << "Global work size: " << globalWorkSize << "\n";
-        std::cout << "Input sizes: ";
+        std::cout << "Buffers:\n";
 
-        int nInBuffers = this->inputSizes.size();
-        size_t *inSizes = this->inputSizes.data();
-        for (int i = 0 ; i < nInBuffers-1 ; i++){
-            std::cout << inSizes[i] << ", ";
+        OpenCLBuffer *buffer;
+        for (int i = 0 ; i < this->inBuffers.size() ; i++){
+            buffer = &this->inBuffers.at(i);
+            printf("    Index: %d, size: %d, direction: input\n",
+                    buffer->index, buffer->numElements);
         }
-        std::cout << inSizes[nInBuffers-1] << "\n";
-        std::cout << "Output size: " << this->outputSize << "\n";
-        std::cout << "Global work size: " << globalWorkSize << "\n";
+        for (int i = 0 ; i < this->outBuffers.size() ; i++){
+            buffer = &this->outBuffers.at(i);
+            printf("    Index: %d, size: %d, direction: output\n",
+                    buffer->index, buffer->numElements);
+        }
     }
     std::cout << "\n\n";
 }
@@ -289,10 +358,11 @@ int OpenCLInterface::getPlatformIDs(){
             std::cout << "Platform ID received\n";
         } else {
             std::string errorExplanation = this->getCodeExplanation(result);
-            throw std::runtime_error("Coudn't get platform ID: " + errorExplanation);
+            throw std::runtime_error("Couldn't get platform ID: " + errorExplanation);
         }
     } catch (const std::exception& e){
         std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
         return -1;
     }
     return 0;
@@ -309,10 +379,11 @@ int OpenCLInterface::getDeviceIDs(){
             std::cout << "Device ID received\n";
         } else {
             std::string errorExplanation = this->getCodeExplanation(result);
-            throw std::runtime_error("Coudn't get device ID: " + errorExplanation);
+            throw std::runtime_error("Couldn't get device ID: " + errorExplanation);
         }
     } catch (const std::exception& e){
         std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
         return -1;
     }
     return 0;
@@ -330,6 +401,7 @@ int OpenCLInterface::createContext(){
         }
     } catch (const std::exception& e){
         std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
         return -1;
     }
     return 0;
@@ -347,44 +419,50 @@ int OpenCLInterface::createCommandQueue(){
         }
     } catch (const std::exception& e){
         std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
         return -1;
     }
     return 0;
 }
 
-int OpenCLInterface::createInBuffer(size_t bufferSize, float *data){
+int OpenCLInterface::createInBuffer(size_t bufferSize, float *data, cl_mem *outHandle){
     try {
         cl_int result;
-        cl_mem buffer = clCreateBuffer(this->context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 
+        cl_mem handle = clCreateBuffer(this->context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 
                                           bufferSize, data, &result);
         if (result == CL_SUCCESS) {
-            std::cout << "Input buffer created\n";
-            this->inBuffers.push_back(buffer);
+            std::cout << "Input buffer created with size: " << bufferSize << " bytes\n";
+            *outHandle = handle;
+            std::cout << "Test handle: " << *outHandle << std::endl;
+
         } else {
             std::string errorExplanation = this->getCodeExplanation(result);
             throw std::runtime_error("Couldn't create input buffer: " + errorExplanation);
         }
     } catch (const std::exception& e){
         std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
         return -1;
     }
     return 0;
 }
 
-int OpenCLInterface::createOutBuffer(size_t bufferSize, float *data){
+int OpenCLInterface::createOutBuffer(size_t bufferSize, float *data, cl_mem *outHandle){
     try {
         cl_int result;
-        cl_mem buffer = clCreateBuffer(this->context, CL_MEM_WRITE_ONLY, 
+        cl_mem handle = clCreateBuffer(this->context, CL_MEM_WRITE_ONLY, 
                                           bufferSize, NULL, &result);
+
         if (result == CL_SUCCESS) {
-            std::cout << "Output buffer created\n";
-            this->outBuffer = buffer;
+            std::cout << "Output buffer created with size: " << bufferSize << " bytes\n";
+            *outHandle = handle;
         } else {
             std::string errorExplanation = this->getCodeExplanation(result);
             throw std::runtime_error("Couldn't create output buffer: " + errorExplanation);
         }
     } catch (const std::exception& e){
         std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
         return -1;
     }
     return 0;
@@ -411,6 +489,7 @@ int OpenCLInterface::createProgram(){
         }
     } catch (const std::exception& e){
         std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
         return -1;
     }
     return 0;
@@ -427,6 +506,7 @@ int OpenCLInterface::buildProgram(){
         }
     } catch (const std::exception& e){
         std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
         return -1;
     }
     return 0;
@@ -444,47 +524,77 @@ int OpenCLInterface::createKernel(){
         }
     } catch (const std::exception& e){
         std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
         return -1;
     }
     return 0;
 }
 
-void OpenCLInterface::setKernelArgs(){
-    int counter = 0;
+int OpenCLInterface::setAllKernelArgs(){
     for (int i = 0 ; i < this->inBuffers.size() ; i++){
-        clSetKernelArg(this->kernel, counter, sizeof(cl_mem), &this->inBuffers.at(i));
-        counter++;
+        OpenCLBuffer *buffer = &this->inBuffers.at(i);
+        if (setKernelArg(buffer->index, buffer->handle) != 0){
+            return -1;
+        };
     }
-    clSetKernelArg(this->kernel, counter, sizeof(cl_mem), &this->outBuffer);
-    counter++;
+
+    for (int i = 0 ; i < this->outBuffers.size() ; i++){
+        OpenCLBuffer *buffer = &this->outBuffers.at(i);
+        if (setKernelArg(buffer->index, buffer->handle) != 0){
+            return -1;
+        };
+    }
+    return 0;
 }
 
-void OpenCLInterface::updateBuffer(const int bufferIndex, const float* newData){
-    size_t size = this->inputSizes.at(bufferIndex);
+int OpenCLInterface::setKernelArg(const int index, cl_mem handle){
+    try {
+        cl_int result;
+        std::cout << "Set kernel data: " << index << " " << handle << "\n";
+
+        result = clSetKernelArg(this->kernel,
+                                index,
+                                sizeof(cl_mem),
+                                &handle);
+        if (result == CL_SUCCESS){
+            std::cout << "Kernel input arg set\n";
+        } else {
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Couldn't set kernel input arg: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
+        return -1;
+    }
+    return 0;
+}
+
+float* OpenCLInterface::getBufferDataPtr(const int index, bool isInput){
+    if (isInput){
+        return this->inBuffers.at(index).data;
+    } else {
+        return this->outBuffers.at(index).data;
+    }
+}
+
+void OpenCLInterface::updateBuffer(const int index) {
+    OpenCLBuffer *buffer = &this->inBuffers.at(index);
     cl_int result = clEnqueueWriteBuffer(
         this->queue,
-        this->inBuffers.at(bufferIndex),  // Existing valid cl_mem handle
+        buffer->handle,  // Existing valid cl_mem handle
         CL_TRUE,                 // Blocking write
         0,                       // Offset
-        size,                    // Size in bytes
-        newData,                 // Host pointer with NEW data
+        buffer->sizeBytes, // Size in bytes
+        buffer->data,                 // Host pointer with NEW data
         0, NULL, NULL
     );
-    std::cout << "Update buffer " << bufferIndex << ": " 
-              << this->getCodeExplanation(result)
-              << std::endl;
+    std::cout << "Wrote to buffer with result: " << getCodeExplanation(result) << std::endl;
 }
 
-void OpenCLInterface::setFloatArg(const int index, float value) {
-    cl_int result = clSetKernelArg(this->kernel, index, sizeof(float), &value);
-    std::cout << "Update float index " << index << ": " 
-              << this->getCodeExplanation(result)
-              << std::endl;
-}
-
-void OpenCLInterface::executeAndRead(){
+void OpenCLInterface::executeAndRead(const int index){
     this->execute();
-    this->readResult();
+    this->readResult(index);
 }
 
 void OpenCLInterface::execute(){
@@ -496,12 +606,25 @@ void OpenCLInterface::execute(){
     }
 }
 
-void OpenCLInterface::readResult(){
-    if (this->isInitialized){
-        clEnqueueReadBuffer(this->queue, this->outBuffer, CL_TRUE, 0,
-                            this->outputSize, this->output, 0, NULL, NULL);
-    } else {
-        std::cout << "Interface not initialized!\n";
+void OpenCLInterface::readResult(const int index){
+    try {
+        OpenCLBuffer *buffer = &this->outBuffers.at(index);
+        if (buffer->isInput){
+            throw std::runtime_error("Trying to read from input buffer!");
+        }
+        if (this->isInitialized){
+            size_t bufferSize = buffer->numElements * sizeof(float);
+            std::cout << "Buffer handle is: " << buffer->handle << "\n";
+            cl_int result = clEnqueueReadBuffer(this->queue, buffer->handle, CL_TRUE, 0,
+                                bufferSize, buffer->data, 0, NULL, NULL);
+            std::cout << "Read from buffer with result: " << getCodeExplanation(result) << std::endl;
+        } else {
+            throw std::runtime_error("Trying to read buffer, but interface is not initialized!\n");
+        }
+    }
+    catch (const std::exception& e){
+        std::cerr << "Error: Couldn't read output buffer: " << e.what() << std::endl;
+        this->errorEncountered = true;
     }
 }
 
@@ -510,9 +633,13 @@ void OpenCLInterface::cleanup(){
     clReleaseProgram(this->program);
 
     for (int i = 0 ; i < this->inBuffers.size() ; i++){
-        clReleaseMemObject(this->inBuffers.at(i));
+        cl_mem handle = this->inBuffers[i].handle;
+        clReleaseMemObject(handle);
     }
-    clReleaseMemObject(this->outBuffer);
+    for (int i = 0 ; i < this->outBuffers.size() ; i++){
+        cl_mem handle = this->outBuffers[i].handle;
+        clReleaseMemObject(handle);
+    }
 
     clReleaseCommandQueue(this->queue);
     clReleaseContext(this->context);
