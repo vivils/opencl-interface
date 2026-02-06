@@ -18,6 +18,15 @@ struct OpenCLBuffer {
     cl_mem handle = nullptr;
 };
 
+struct OpenCLImage {
+    int index;
+    bool isInput;
+    cl_mem handle;
+    cl_image_format format;
+    cl_image_desc desc = {0};
+    float *data;
+};
+
 class OpenCLInterface
 {
     public:
@@ -26,12 +35,13 @@ class OpenCLInterface
         OpenCLInterface();
         void initialize(const char* source,
                         const char* programName,
-                        size_t globalWorkSize,
+                        cl_uint workDimensions,
+                        size_t *globalWorkSize,
                         std::vector<size_t> inputNumElements,
                         std::vector<float*> inputPtrs,
                         std::vector<size_t> outputNumElements,
                         std::vector<float*> outputPtrs);
-        void setGlobalWorkSize(size_t size);
+        void setGlobalWorkSize(size_t *size);
         void setSource(const char* source, const char* name);
         float* getBufferDataPtr(const int index, bool isInput);
         void updateBuffer(const int index);
@@ -50,9 +60,14 @@ class OpenCLInterface
         cl_kernel kernel;
         const char* programSource = "No program";
         const char* programName = "No program name";
-        size_t globalWorkSize;
+        cl_uint workDimensions;
+        size_t *globalWorkSize;
+        size_t numArguments;
         std::vector<OpenCLBuffer> inBuffers = {};
         std::vector<OpenCLBuffer> outBuffers = {};
+        std::vector<OpenCLImage> inImages = {};
+        std::vector<OpenCLImage> outImages = {};
+
 
         std::string getCodeExplanation(cl_int code);
         void printCodeExplanation(cl_int code);
@@ -60,8 +75,13 @@ class OpenCLInterface
         int getDeviceIDs();
         int createContext();
         int createCommandQueue();
+        void updateArgNum();
         int newBuffer(size_t numElements, float *data, bool isInput);
+        int newImage(int width, int height, int depth,
+                              float *data, bool isInput);
         int createBuffer(size_t bufferSize, float *data, cl_mem *handle, bool isInput);
+        int createImage(cl_image_format *format, cl_image_desc *desc,
+                                         float *data, cl_mem *outHandle, bool isInput);
         int createProgram();
         int buildProgram();
         int createKernel();

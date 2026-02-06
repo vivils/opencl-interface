@@ -34,7 +34,8 @@ OpenCLInterface::OpenCLInterface(){
 
 void OpenCLInterface::initialize(const char* programName,
                                  const char* source,
-                                 size_t globalWorkSize,
+                                 cl_uint workDimensions,
+                                 size_t *globalWorkSize,
                                  std::vector<size_t> inputNumElements,
                                  std::vector<float*> inputPtrs,
                                  std::vector<size_t> outputNumElements,
@@ -48,6 +49,7 @@ void OpenCLInterface::initialize(const char* programName,
             throw std::runtime_error("Length of output data pointers and length of output sizes don't match!");
         }
 
+        this->workDimensions = workDimensions;
         this->globalWorkSize = globalWorkSize;
 
         int numElements;
@@ -94,7 +96,7 @@ void OpenCLInterface::initialize(const char* programName,
 }
 
 int OpenCLInterface::newBuffer(size_t numElements, float *data, bool isInput){
-    int index = this->inBuffers.size() + this->outBuffers.size();
+    int index = this->numArguments;
     size_t sizeBytes = numElements*sizeof(float);
     cl_mem handle = nullptr;
 
@@ -123,10 +125,52 @@ int OpenCLInterface::newBuffer(size_t numElements, float *data, bool isInput){
     } else {
         this->outBuffers.push_back(buffer);
     }
+    this->updateArgNum();
+    return 0;
+}
 
-    if (handle == nullptr){
-        std::cout << "handle is nullptr\n";
+void OpenCLInterface::updateArgNum(){
+    this->numArguments = this->inBuffers.size() + 
+                         this->outBuffers.size() +
+                         this->inImages.size() +
+                         this->outImages.size();
+}
+
+int OpenCLInterface::newImage(int width, int height, int depth,
+                              float *data, bool isInput){
+    int index = this->numArguments;
+    cl_mem handle = nullptr;
+    OpenCLImage image;
+    image.format.image_channel_order = CL_RGB;
+    image.format.image_channel_data_type = CL_FLOAT;
+    image.desc = {0};
+    image.desc.image_type = CL_MEM_OBJECT_IMAGE2D;
+    image.desc.image_width = width;
+    image.desc.image_height = height;
+    image.desc.image_depth = depth;
+    image.index = index;
+    image.isInput = isInput;
+    image.data = data;
+    
+    try {
+        int result;
+        result = this->createImage(&image.format, &image.desc, data, &handle, isInput);
+        if (result != 0){
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Create buffer failed: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
+        return -1;
     }
+    image.handle = handle;
+    if (isInput){
+        this->inImages.push_back(image);
+    } else {
+        this->outImages.push_back(image);
+    }
+    this->updateArgNum();
     return 0;
 }
 
@@ -328,7 +372,7 @@ void OpenCLInterface::printInfo(){
     } else {
         std::cout << "Program name: " << this->programName << std::endl;
         std::cout << "Program source: \n\n" << this->programSource << std::endl;
-        std::cout << "Global work size: " << globalWorkSize << "\n";
+        std::cout << "Global work size: " << *globalWorkSize << "\n";
         std::cout << "Buffers:\n";
 
         OpenCLBuffer *buffer;
@@ -424,7 +468,6 @@ int OpenCLInterface::createBuffer(size_t bufferSize, float *data, cl_mem *outHan
     try {
         cl_int result;
         cl_mem handle;
-        cl_mem_flags bufferFlags;
         if (isInput){
             handle = clCreateBuffer(this->context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 
                                               bufferSize, data, &result);
@@ -434,11 +477,6 @@ int OpenCLInterface::createBuffer(size_t bufferSize, float *data, cl_mem *outHan
         }
         if (result == CL_SUCCESS) {
             std::cout << "Buffer created with size: " << bufferSize << " bytes\n";
-            if (isInput){
-                std::cout << "Direction: in\n";
-            } else {
-                std::cout << "Direction: out\n";
-            }
             *outHandle = handle;
 
         } else {
@@ -453,7 +491,44 @@ int OpenCLInterface::createBuffer(size_t bufferSize, float *data, cl_mem *outHan
     return 0;
 }
 
-void OpenCLInterface::setGlobalWorkSize(size_t size){
+int OpenCLInterface::createImage(cl_image_format *format, cl_image_desc *desc,
+                                 float *data, cl_mem *outHandle, bool isInput){
+    try {
+        cl_int result;
+        cl_mem handle;
+        if (isInput){
+            handle = clCreateImage(this->context,
+                                   CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 
+                                   format,
+                                   desc,
+                                   data,
+                                   &result);
+        } else {
+            handle = clCreateImage(this->context,
+                                   CL_MEM_WRITE_ONLY,
+                                   format,
+                                   desc,
+                                   NULL,
+                                   &result);
+        }
+        if (result == CL_SUCCESS) {
+            std::cout << "Image created with format: " << "..." << " bytes\n";
+            *outHandle = handle;
+
+        } else {
+            std::string errorExplanation = this->getCodeExplanation(result);
+            throw std::runtime_error("Couldn't create buffer: " + errorExplanation);
+        }
+    } catch (const std::exception& e){
+        std::cerr << "Error: " << e.what() << std::endl;
+        this->errorEncountered = true;
+        return -1;
+    }
+    return 0;
+}
+
+
+void OpenCLInterface::setGlobalWorkSize(size_t *size){
     this->globalWorkSize = size;
 }
 
@@ -529,6 +604,20 @@ int OpenCLInterface::setAllKernelArgs(){
             return -1;
         };
     }
+
+    for (int i = 0 ; i < this->outImages.size() ; i++){
+        OpenCLImage *buffer = &this->outImages.at(i);
+        if (setKernelArg(buffer->index, buffer->handle) != 0){
+            return -1;
+        };
+    }
+
+    for (int i = 0 ; i < this->outImages.size() ; i++){
+        OpenCLImage *image = &this->outImages.at(i);
+        if (setKernelArg(image->index, image->handle) != 0){
+            return -1;
+        };
+    }
     return 0;
 }
 
@@ -584,7 +673,9 @@ void OpenCLInterface::executeAndRead(const int index){
 
 void OpenCLInterface::execute(){
     if (this->isInitialized){
-        clEnqueueNDRangeKernel(this->queue, this->kernel, 1, NULL, &(this->globalWorkSize), NULL, 0, NULL, NULL);
+        clEnqueueNDRangeKernel(this->queue, this->kernel,
+                               this->workDimensions, NULL, this->globalWorkSize,
+                               NULL, 0, NULL, NULL);
         clFinish(queue);
     } else {
         std::cout << "Interface not initialized!\n";
