@@ -61,8 +61,7 @@ class OpenCLInterface
         int createContext();
         int createCommandQueue();
         int newBuffer(size_t numElements, float *data, bool isInput);
-        int createInBuffer(size_t bufferSize, float *data, cl_mem *handle);
-        int createOutBuffer(size_t bufferSize, float *data, cl_mem *handle);
+        int createBuffer(size_t bufferSize, float *data, cl_mem *handle, bool isInput);
         int createProgram();
         int buildProgram();
         int createKernel();

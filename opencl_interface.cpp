@@ -62,7 +62,6 @@ void OpenCLInterface::initialize(const char* programName,
             }
         }
         int numOutputs = outputPtrs.size();
-        std::cout << "Num outputs: " << numOutputs << std::endl;
         for (int i = 0 ; i < numOutputs ; i++){
             numElements = outputNumElements[i];
             dataPtr = outputPtrs[i];
@@ -108,11 +107,7 @@ int OpenCLInterface::newBuffer(size_t numElements, float *data, bool isInput){
     
     try {
         int result;
-        if (buffer.isInput){
-            result = this->createInBuffer(sizeBytes, data, &handle);
-        } else {
-            result = this->createOutBuffer(sizeBytes, data, &handle);
-        }
+        result = this->createBuffer(sizeBytes, data, &handle, isInput);
         if (result != 0){
             std::string errorExplanation = this->getCodeExplanation(result);
             throw std::runtime_error("Create buffer failed: " + errorExplanation);
@@ -425,40 +420,30 @@ int OpenCLInterface::createCommandQueue(){
     return 0;
 }
 
-int OpenCLInterface::createInBuffer(size_t bufferSize, float *data, cl_mem *outHandle){
+int OpenCLInterface::createBuffer(size_t bufferSize, float *data, cl_mem *outHandle, bool isInput){
     try {
         cl_int result;
-        cl_mem handle = clCreateBuffer(this->context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 
-                                          bufferSize, data, &result);
-        if (result == CL_SUCCESS) {
-            std::cout << "Input buffer created with size: " << bufferSize << " bytes\n";
-            *outHandle = handle;
-            std::cout << "Test handle: " << *outHandle << std::endl;
-
+        cl_mem handle;
+        cl_mem_flags bufferFlags;
+        if (isInput){
+            handle = clCreateBuffer(this->context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 
+                                              bufferSize, data, &result);
         } else {
-            std::string errorExplanation = this->getCodeExplanation(result);
-            throw std::runtime_error("Couldn't create input buffer: " + errorExplanation);
+            handle = clCreateBuffer(this->context, CL_MEM_WRITE_ONLY, 
+                                              bufferSize, NULL, &result);
         }
-    } catch (const std::exception& e){
-        std::cerr << "Error: " << e.what() << std::endl;
-        this->errorEncountered = true;
-        return -1;
-    }
-    return 0;
-}
-
-int OpenCLInterface::createOutBuffer(size_t bufferSize, float *data, cl_mem *outHandle){
-    try {
-        cl_int result;
-        cl_mem handle = clCreateBuffer(this->context, CL_MEM_WRITE_ONLY, 
-                                          bufferSize, NULL, &result);
-
         if (result == CL_SUCCESS) {
-            std::cout << "Output buffer created with size: " << bufferSize << " bytes\n";
+            std::cout << "Buffer created with size: " << bufferSize << " bytes\n";
+            if (isInput){
+                std::cout << "Direction: in\n";
+            } else {
+                std::cout << "Direction: out\n";
+            }
             *outHandle = handle;
+
         } else {
             std::string errorExplanation = this->getCodeExplanation(result);
-            throw std::runtime_error("Couldn't create output buffer: " + errorExplanation);
+            throw std::runtime_error("Couldn't create buffer: " + errorExplanation);
         }
     } catch (const std::exception& e){
         std::cerr << "Error: " << e.what() << std::endl;
